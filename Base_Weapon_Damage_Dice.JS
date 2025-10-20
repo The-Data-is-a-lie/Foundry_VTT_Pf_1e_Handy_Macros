@@ -1,9 +1,8 @@
 // Notes:
-// Top part: Scales base weapon damage
-// Bot part: Scales conditional damage
+// Unified scaling hook — handles both base weapon and conditional damage scaling.
 
 // Damage table for scaling
-const damageTable = [
+let damageTable = [
   { dice: "1", average: 1 },
   { dice: "1d2", average: 1.5 },
   { dice: "1d3", average: 2 },
@@ -50,18 +49,17 @@ const damageTable = [
   { dice: "26d12", average: 169 }
 ];
 
-// Helper functions
+// --- Helper functions ---
 function calculateAverage(diceFormula) {
   if (!diceFormula) return 0;
-
   let total = 0;
-  const diceMatches = diceFormula.match(/\d+d\d+/g);
+  let diceMatches = diceFormula.match(/\d+d\d+/g);
   if (diceMatches) {
-    for (const dice of diceMatches) {
-      const m = dice.match(/(\d+)d(\d+)/);
+    for (let dice of diceMatches) {
+      let m = dice.match(/(\d+)d(\d+)/);
       if (m) {
-        const numDice = parseInt(m[1]);
-        const dieSize = parseInt(m[2]);
+        let numDice = parseInt(m[1]);
+        let dieSize = parseInt(m[2]);
         total += numDice * (dieSize + 1) / 2;
       }
     }
@@ -73,8 +71,7 @@ function findClosestDice(targetAverage) {
   if (targetAverage <= damageTable[0].average) return damageTable[0].dice;
   if (targetAverage >= damageTable[damageTable.length - 1].average)
     return damageTable[damageTable.length - 1].dice;
-
-  for (const entry of damageTable) {
+  for (let entry of damageTable) {
     if (entry.average >= targetAverage) return entry.dice;
   }
   return damageTable[damageTable.length - 1].dice;
@@ -82,15 +79,13 @@ function findClosestDice(targetAverage) {
 
 function scaleDice(dice, sizeModifier) {
   let startIndex = damageTable.findIndex((entry) => entry.dice === dice);
-
   if (startIndex === -1) {
-    const avg = calculateAverage(dice);
-    const closest = findClosestDice(avg);
+    let avg = calculateAverage(dice);
+    let closest = findClosestDice(avg);
     startIndex = damageTable.findIndex((entry) => entry.dice === closest);
     if (startIndex === -1) startIndex = 0;
   }
-
-  const newIndex = Math.min(startIndex + sizeModifier * 2, damageTable.length - 1);
+  let newIndex = Math.min(startIndex + sizeModifier * 2, damageTable.length - 1);
   return damageTable[newIndex].dice;
 }
 
@@ -104,48 +99,83 @@ function scalePartArray(arr, sizeModifier) {
   return arr.map((part) => [scaleFormula(part[0], sizeModifier), part[1] || ""]);
 }
 
-// --- Hook 1: Scale base weapon damage ---
+// --- Unified Hook ---
 Hooks.on("ckl-roll-bonuses_getConditionalParts", (...args) => {
-  const firstArg = args[0];
-  if (!firstArg?.actor || !firstArg?.item || !firstArg?.action) return;
+  let firstArg = args[0];
 
-  const actor = firstArg.actor;
-  const item = firstArg.item;
-  const action = firstArg.action;
-  const size = actor.system.resources.sizefordamage?.value || 0;
 
-  // Get base attack2 damage
-  const attack2Damage = item._source.system.actions[1]?.damage;
-  if (!attack2Damage) return;
+  if (!firstArg) return;
 
-  const scaledDamage = duplicate(attack2Damage);
+  let actor = firstArg.actor;
+  if (!actor) return;
+  let size = actor.system.resources.sizefordamage?.value || 0;
 
-  // Ensure all parts exist
-  scaledDamage.parts = scaledDamage.parts || [];
-  scaledDamage.critParts = scaledDamage.critParts || [];
-  scaledDamage.nonCritParts = scaledDamage.nonCritParts || [];
+  // --- CASE 1: Base weapon scaling ---
+  if (firstArg.item && firstArg.action) {
+    let item = firstArg.item;
+    let action = firstArg.action;
 
-  // Scale each part
-  scaledDamage.parts.forEach((p) => { if (p.formula) p.formula = scaleFormula(p.formula, size); });
-  scaledDamage.critParts.forEach((p) => { if (p.formula) p.formula = scaleFormula(p.formula, size); });
-  scaledDamage.nonCritParts.forEach((p) => { if (p.formula) p.formula = scaleFormula(p.formula, size); });
+    let attack2Damage = item._source.system.actions[1]?.damage;
+    if (attack2Damage) {
+      let scaledDamage = duplicate(attack2Damage);
 
-  action.damage = scaledDamage;
-});
+      // Ensure arrays exist
+      scaledDamage.parts = scaledDamage.parts || [];
+      scaledDamage.critParts = scaledDamage.critParts || [];
+      scaledDamage.nonCritParts = scaledDamage.nonCritParts || [];
 
-// --- Hook 2: Scale conditional damage safely ---
-Hooks.on("ckl-roll-bonuses_getConditionalParts", (...args) => {
-  for (const part of args) {
-    if (part._scaled) continue; // Avoid double-scaling
-    part._scaled = true;
+      // Scale each group
+      for (let group of [scaledDamage.parts, scaledDamage.critParts, scaledDamage.nonCritParts]) {
+        group.forEach((p) => {
+          if (p.formula) p.formula = scaleFormula(p.formula, size);
+        });
+      }
 
-    const actor = part.actor;
-    if (!actor) continue;
-    const size = actor.system.resources.sizefordamage?.value || 0;
-
-    // Safe scaling for conditional damage
-    part["damage.crit"] = scalePartArray(part["damage.crit"], size);
-    part["damage.nonCrit"] = scalePartArray(part["damage.nonCrit"], size);
-    part["damage.normal"] = scalePartArray(part["damage.normal"], size);
+      action.damage = scaledDamage;
+    }
   }
+
+
+// --- CASE 2: Conditional damage scaling directly on secondArg ---
+console.log("Applying conditional damage scaling for size modifier:", size);
+
+let secondArg = args[1];
+if (!secondArg) return;
+console.log("secondArg before scaling:", secondArg);
+
+// Helper function to scale each damage array
+function scaleDamageArray(arr) {
+  if (!arr?.length) return;
+  console.log("Gate 1 - damage array:", arr);
+  for (let dmg of arr) {
+    console.log("Original damage entry:", dmg);
+    // dmg is an array: [formulaString, setOfTypes, isCritical]
+    let original = dmg[0];
+    dmg[0] = scaleFormula(dmg[0], size);
+    console.log(`Scaled damage "${original}" → "${dmg[0]}"`);
+  }
+}
+
+// --- Prevent double/triple scaling using a per-roll tracker ---
+firstArg._scaledConditionalDamage ??= new Set();
+
+// Use secondArg id or fallback index as unique key
+const key = secondArg._id || secondArg?.action?.id || args.indexOf(secondArg);
+if (firstArg._scaledConditionalDamage.has(key)) {
+  console.log("Conditional damage already scaled for this secondArg, skipping.");
+  return;
+}
+
+// Scale damage arrays
+scaleDamageArray(secondArg["damage.normal"]);
+scaleDamageArray(secondArg["damage.crit"]);
+scaleDamageArray(secondArg["damage.nonCrit"]);
+
+// Mark as scaled for this roll
+firstArg._scaledConditionalDamage.add(key);
+console.log("✅ Conditional damages from secondArg scaled once for this roll.");
+
+
+
 });
+
