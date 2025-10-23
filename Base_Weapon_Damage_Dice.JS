@@ -140,6 +140,7 @@ Hooks.on("ckl-roll-bonuses_getConditionalParts", (...args) => {
 console.log("Applying conditional damage scaling for size modifier:", size);
 
 let secondArg = args[1];
+// ThirdArg is chat message (everything is already evalulated there)
 if (!secondArg) return;
 console.log("secondArg before scaling:", secondArg);
 
