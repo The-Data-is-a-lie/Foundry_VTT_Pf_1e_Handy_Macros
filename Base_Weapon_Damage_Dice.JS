@@ -91,6 +91,16 @@ function scaleDice(dice, sizeModifier) {
 
 function scaleFormula(formula, sizeModifier) {
   if (!formula) return formula;
+
+  let skipRegex = /\/\s*\(1\)/;
+  // regular expression to look for / (1) with any amount of spaces between / and (1). It skips scaling if this is the case
+
+  if (skipRegex.test(formula)) {
+    console.log("Skipping scaling for tagged formula:", formula);
+    
+    return formula;
+  }
+
   return formula.replace(/\d+d\d+/g, (match) => scaleDice(match, sizeModifier));
 }
 
@@ -179,4 +189,3 @@ console.log("✅ Conditional damages from secondArg scaled once for this roll.")
 
 
 });
-
